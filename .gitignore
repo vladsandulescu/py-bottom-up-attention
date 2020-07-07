@@ -1,3 +1,5 @@
+.DS_Store
+
 # output dir
 output
 instant_test_output
@@ -23,7 +25,7 @@ dist/
 *.npy
 
 # ipython/jupyter notebooks
-*.ipynb
+#*.ipynb
 **/.ipynb_checkpoints/
 
 # Editor temporaries
