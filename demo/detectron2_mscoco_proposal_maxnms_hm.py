@@ -33,6 +33,7 @@ parser.add_argument('--data_path', default='/home/ubuntu/playground/hmm/data/spl
                     help='path to the train/dev/test split images folders')
 parser.add_argument('--output_path', default='/home/ubuntu/playground/hmm/data/imgfeat/',
                     help='path to the output for the extracted features')
+parser.add_argument('--output_type', default='tsv', help='tsv or json (box file per image)')
 parser.add_argument('--min_boxes', default=36, type=int, help='either 10 for 10-100 or 36')
 parser.add_argument('--max_boxes', default=36, type=int, help='either 100 for 10-100 or 36')
 parser.add_argument('--roi_score_thresh', default=0.2, type=float, help='ROI score threshold, use 0.5 for VL-BERT')
@@ -157,7 +158,7 @@ def dump_features(writer, detector, pathXid):
         item = {
             "img_id": img_id,
             "img_h": img.shape[0],
-            "img_w": img.shape[1], 
+            "img_w": img.shape[1],
             "objects_id": base64.b64encode(instances.pred_classes.numpy()).decode(),  # int64
             "objects_conf": base64.b64encode(instances.scores.numpy()).decode(),  # float32
             "attrs_id": base64.b64encode(np.zeros(num_objects, np.int64)).decode(),  # int64
@@ -168,35 +169,68 @@ def dump_features(writer, detector, pathXid):
         }
 
         writer.writerow(item)
+
+
+def dump_features_json(output_path, detector, pathXid):
+    img_paths, img_ids = zip(*pathXid)
+    imgs = [cv2.imread(img_path) for img_path in img_paths]
+    instances_list, features_list = doit(detector, imgs)
+
+    for img, img_id, instances, features in zip(imgs, img_ids, instances_list, features_list):
+        instances = instances.to('cpu')
+        features = features.to('cpu')
+
+        num_objects = len(instances)
+
+        item = {
+            "img_id": img_id,
+            "img_h": img.shape[0],
+            "img_w": img.shape[1],
+            "objects_id": base64.b64encode(instances.pred_classes.numpy()).decode(),  # int64
+            "objects_conf": base64.b64encode(instances.scores.numpy()).decode(),  # float32
+            "attrs_id": base64.b64encode(np.zeros(num_objects, np.int64)).decode(),  # int64
+            "attrs_conf": base64.b64encode(np.zeros(num_objects, np.float32)).decode(),  # float32
+            "num_boxes": num_objects,
+            "boxes": base64.b64encode(instances.pred_boxes.tensor.numpy()).decode(),  # float32
+            "features": base64.b64encode(features.numpy()).decode()  # float32
+        }
+        with open(os.path.join(output_path, img_id + '.json'), 'w') as jsonfile:
+            json.dump(item, jsonfile)
     
 
 FIELDNAMES = ["img_id", "img_h", "img_w", "objects_id", "objects_conf",
               "attrs_id", "attrs_conf", "num_boxes", "boxes", "features"]
-def extract_feat(outfile, detector, pathXid):
-    # Check existing images in tsv file.
-    wanted_ids = set([image_id[1] for image_id in pathXid])
-    found_ids = set()
-    if os.path.exists(outfile):
-        with open(outfile, 'r') as tsvfile:
-            reader = csv.DictReader(tsvfile, delimiter='\t', fieldnames=FIELDNAMES)
-            for item in reader:
-                found_ids.add(item['img_id'])
-    missing = wanted_ids - found_ids
-    
-    # Extract features for missing images.
-    missing_pathXid = list(filter(lambda x:x[1] in missing, pathXid))
-    with open(outfile, 'w') as tsvfile:
-        writer = csv.DictWriter(tsvfile, delimiter='\t', fieldnames=FIELDNAMES)
+def extract_feat(output_type, outfile, detector, pathXid):
+    if output_type == 'tsv':
+        # Check existing images in tsv file.
+        wanted_ids = set([image_id[1] for image_id in pathXid])
+        found_ids = set()
+        if os.path.exists(outfile):
+            with open(outfile, 'r') as tsvfile:
+                reader = csv.DictReader(tsvfile, delimiter='\t', fieldnames=FIELDNAMES)
+                for item in reader:
+                    found_ids.add(item['img_id'])
+        missing = wanted_ids - found_ids
+
+        # Extract features for missing images.
+        missing_pathXid = list(filter(lambda x:x[1] in missing, pathXid))
+        with open(outfile, 'w') as tsvfile:
+            writer = csv.DictWriter(tsvfile, delimiter='\t', fieldnames=FIELDNAMES)
+            for start in tqdm.tqdm(range(0, len(pathXid), args.batchsize)):
+                pathXid_trunk = pathXid[start: start + args.batchsize]
+                dump_features(writer, detector, pathXid_trunk)
+                """
+                try:
+                    dump_features(writer, detector, pathXid_trunk)
+                except Exception as e:
+                    print(e)
+                    break
+                """
+    elif output_type == 'json':
         for start in tqdm.tqdm(range(0, len(pathXid), args.batchsize)):
             pathXid_trunk = pathXid[start: start + args.batchsize]
-            dump_features(writer, detector, pathXid_trunk)
-            """
-            try:
-                dump_features(writer, detector, pathXid_trunk)
-            except Exception as e:
-                print(e)
-                break
-            """
+            dump_features_json(output_path, detector, pathXid_trunk)
+
 
 def load_image_ids(img_root, split_dir):
     """images in the same directory are in the same split"""
@@ -265,5 +299,15 @@ def build_model():
 if __name__ == "__main__":
     pathXid = load_image_ids(args.data_path, args.split)     # Get paths and ids
     detector = build_model()
-    extract_feat(os.path.join(args.output_path, ('%s_d2_%d-%d_batch.tsv' % (args.split, args.min_boxes, args.max_boxes))),
-                 detector, pathXid)
+    if args.output_type == 'tsv':
+        output_path = os.path.join(args.output_path, ('d2_%d-%d/tsv' % (args.min_boxes, args.max_boxes)))
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+        output_path = os.path.join(output_path, ('%s.tsv' % args.split))
+    elif args.output_type == 'json':
+        output_path = os.path.join(args.output_path, ('d2_%d-%d/json/%s' % (args.min_boxes, args.max_boxes, args.split)))
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+    else:
+        raise ValueError("Invalid output_type. Should be either tsv or json.")
+    extract_feat(args.output_type, output_path, detector, pathXid)
