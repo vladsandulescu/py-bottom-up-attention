@@ -101,7 +101,11 @@ def doit(detector, raw_images):
         feature_pooled = box_features.mean(dim=[2, 3])  # (sum_proposals, 2048), pooled to 1x1
         
         # Predict classes and boxes for each proposal.
-        pred_class_logits, pred_proposal_deltas = detector.model.roi_heads.box_predictor(feature_pooled)
+        if args.weight == "vgattr":
+            pred_class_logits, pred_attr_logits, pred_proposal_deltas = detector.model.roi_heads.box_predictor(
+                feature_pooled)
+        else:
+            pred_class_logits, pred_proposal_deltas = detector.model.roi_heads.box_predictor(feature_pooled)
         rcnn_outputs = FastRCNNOutputs(
             detector.model.roi_heads.box2box_transform,
             pred_class_logits,
@@ -109,7 +113,11 @@ def doit(detector, raw_images):
             proposals,
             detector.model.roi_heads.smooth_l1_beta,
         )
-        
+
+        if args.weight == "vgattr":
+            attr_prob = pred_attr_logits[..., :-1].softmax(-1)
+            max_attr_prob, max_attr_label = attr_prob.max(-1)
+
         # Fixed-number NMS
         instances_list, ids_list = [], []
         probs_list = rcnn_outputs.predict_probs()
@@ -122,6 +130,14 @@ def doit(detector, raw_images):
                 )
                 if len(ids) >= args.min_boxes:
                     break
+
+            if args.weight == "vgattr":
+                max_attr_prob = max_attr_prob[ids].detach()
+                max_attr_label = max_attr_label[ids].detach()
+
+                instances.attr_scores = max_attr_prob
+                instances.attr_classes = max_attr_label
+
             instances_list.append(instances)
             ids_list.append(ids)
         
@@ -155,18 +171,32 @@ def dump_features(writer, detector, pathXid):
 
         num_objects = len(instances)
 
-        item = {
-            "img_id": img_id,
-            "img_h": img.shape[0],
-            "img_w": img.shape[1],
-            "objects_id": base64.b64encode(instances.pred_classes.numpy()).decode(),  # int64
-            "objects_conf": base64.b64encode(instances.scores.numpy()).decode(),  # float32
-            "attrs_id": base64.b64encode(np.zeros(num_objects, np.int64)).decode(),  # int64
-            "attrs_conf": base64.b64encode(np.zeros(num_objects, np.float32)).decode(),  # float32
-            "num_boxes": num_objects,
-            "boxes": base64.b64encode(instances.pred_boxes.tensor.numpy()).decode(),  # float32
-            "features": base64.b64encode(features.numpy()).decode()  # float32
-        }
+        if args.weight == "vgattr":
+            item = {
+                "img_id": img_id,
+                "img_h": img.shape[0],
+                "img_w": img.shape[1],
+                "objects_id": base64.b64encode(instances.pred_classes.numpy()).decode(),  # int64
+                "objects_conf": base64.b64encode(instances.scores.numpy()).decode(),  # float32
+                "attrs_id": base64.b64encode(instances.attr_classes.numpy()).decode(),  # int64
+                "attrs_conf": base64.b64encode(instances.attr_scores.numpy()).decode(),  # float32
+                "num_boxes": num_objects,
+                "boxes": base64.b64encode(instances.pred_boxes.tensor.numpy()).decode(),  # float32
+                "features": base64.b64encode(features.numpy()).decode()  # float32
+            }
+        else:
+            item = {
+                "img_id": img_id,
+                "img_h": img.shape[0],
+                "img_w": img.shape[1],
+                "objects_id": base64.b64encode(instances.pred_classes.numpy()).decode(),  # int64
+                "objects_conf": base64.b64encode(instances.scores.numpy()).decode(),  # float32
+                "attrs_id": base64.b64encode(np.zeros(num_objects, np.int64)).decode(),  # int64
+                "attrs_conf": base64.b64encode(np.zeros(num_objects, np.float32)).decode(),  # float32
+                "num_boxes": num_objects,
+                "boxes": base64.b64encode(instances.pred_boxes.tensor.numpy()).decode(),  # float32
+                "features": base64.b64encode(features.numpy()).decode()  # float32
+            }
 
         writer.writerow(item)
 
@@ -182,18 +212,33 @@ def dump_features_json(output_path, detector, pathXid):
 
         num_objects = len(instances)
 
-        item = {
-            "img_id": img_id,
-            "img_h": img.shape[0],
-            "img_w": img.shape[1],
-            "objects_id": base64.b64encode(instances.pred_classes.numpy()).decode(),  # int64
-            "objects_conf": base64.b64encode(instances.scores.numpy()).decode(),  # float32
-            "attrs_id": base64.b64encode(np.zeros(num_objects, np.int64)).decode(),  # int64
-            "attrs_conf": base64.b64encode(np.zeros(num_objects, np.float32)).decode(),  # float32
-            "num_boxes": num_objects,
-            "boxes": base64.b64encode(instances.pred_boxes.tensor.numpy()).decode(),  # float32
-            "features": base64.b64encode(features.numpy()).decode()  # float32
-        }
+        if args.weight == "vgattr":
+            item = {
+                "img_id": img_id,
+                "img_h": img.shape[0],
+                "img_w": img.shape[1],
+                "objects_id": base64.b64encode(instances.pred_classes.numpy()).decode(),  # int64
+                "objects_conf": base64.b64encode(instances.scores.numpy()).decode(),  # float32
+                "attrs_id": base64.b64encode(instances.attr_classes.numpy()).decode(),  # int64
+                "attrs_conf": base64.b64encode(instances.attr_scores.numpy()).decode(),  # float32
+                "num_boxes": num_objects,
+                "boxes": base64.b64encode(instances.pred_boxes.tensor.numpy()).decode(),  # float32
+                "features": base64.b64encode(features.numpy()).decode()  # float32
+            }
+
+        else:
+            item = {
+                "img_id": img_id,
+                "img_h": img.shape[0],
+                "img_w": img.shape[1],
+                "objects_id": base64.b64encode(instances.pred_classes.numpy()).decode(),  # int64
+                "objects_conf": base64.b64encode(instances.scores.numpy()).decode(),  # float32
+                "attrs_id": base64.b64encode(np.zeros(num_objects, np.int64)).decode(),  # int64
+                "attrs_conf": base64.b64encode(np.zeros(num_objects, np.float32)).decode(),  # float32
+                "num_boxes": num_objects,
+                "boxes": base64.b64encode(instances.pred_boxes.tensor.numpy()).decode(),  # float32
+                "features": base64.b64encode(features.numpy()).decode()  # float32
+            }
         with open(os.path.join(output_path, img_id + '.json'), 'w') as jsonfile:
             json.dump(item, jsonfile)
     
@@ -290,6 +335,21 @@ def build_model():
             cfg.MODEL.WEIGHTS = "http://nlp.cs.unc.edu/models/faster_rcnn_from_caffe_attr_original.pkl"
         else:
             cfg.MODEL.WEIGHTS = "http://nlp.cs.unc.edu/models/faster_rcnn_from_caffe.pkl"
+    elif args.weight == 'vgattr':
+        cfg = get_cfg()
+        cfg.merge_from_file(
+            os.path.join(D2_ROOT, "configs/VG-Detection/faster_rcnn_R_101_C4_attr_caffemaxpool.yaml"))  ##
+        cfg.MODEL.RPN.POST_NMS_TOPK_TEST = 300
+        cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.6
+        cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.2
+        cfg.INPUT.MIN_SIZE_TEST = 600
+        cfg.INPUT.MAX_SIZE_TEST = 1000
+        cfg.MODEL.RPN.NMS_THRESH = 0.7
+        # VG Weight
+        # if args.min_boxes == 10 and args.max_boxes == 100:
+        cfg.MODEL.WEIGHTS = "http://nlp.cs.unc.edu/models/faster_rcnn_from_caffe_attr.pkl"
+        # else:
+        #     cfg.MODEL.WEIGHTS = "http://nlp.cs.unc.edu/models/faster_rcnn_from_caffe.pkl"
     else:
         assert False, "no this weight"
     detector = DefaultPredictor(cfg)
@@ -297,10 +357,13 @@ def build_model():
 
 
 if __name__ == "__main__":
+    if args.weight == "vgattr":
+        args.batchsize = 1
+
     pathXid = load_image_ids(args.data_path, args.split)     # Get paths and ids
     detector = build_model()
     if args.output_type == 'tsv':
-        output_path = os.path.join(args.output_path, ('d2_%d-%d/tsv' % (args.min_boxes, args.max_boxes)))
+        output_path = os.path.join(args.output_path, ('d2_%d-%d_%s/tsv' % (args.min_boxes, args.max_boxes, args.weight)))
         if not os.path.exists(output_path):
             os.makedirs(output_path)
         output_path = os.path.join(output_path, ('%s.tsv' % args.split))
