@@ -29,10 +29,8 @@ D2_ROOT = os.path.dirname(os.path.dirname(detectron2.__file__)) # Root of detect
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--split', default='dev', help='train,dev,test')
-parser.add_argument('--data_path', default='/home/ubuntu/playground/hmm/data/split/',
-                    help='path to the train/dev/test split images folders')
-parser.add_argument('--output_path', default='/home/ubuntu/playground/hmm/data/imgfeat/',
-                    help='path to the output for the extracted features')
+parser.add_argument('--data_path', default='', help='path to the train/dev/test split images folders')
+parser.add_argument('--output_path', default='', help='path to the output for the extracted features')
 parser.add_argument('--output_type', default='tsv', help='tsv or json (box file per image)')
 parser.add_argument('--min_boxes', default=36, type=int, help='either 10 for 10-100 or 36')
 parser.add_argument('--max_boxes', default=36, type=int, help='either 100 for 10-100 or 36')
