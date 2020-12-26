@@ -24,7 +24,6 @@ from detectron2.config import get_cfg
 from detectron2.modeling.postprocessing import detector_postprocess
 from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers, FastRCNNOutputs
 
-
 D2_ROOT = os.path.dirname(os.path.dirname(detectron2.__file__)) # Root of detectron2
 
 parser = argparse.ArgumentParser()
@@ -35,7 +34,7 @@ parser.add_argument('--output_type', default='tsv', help='tsv or json (box file 
 parser.add_argument('--min_boxes', default=36, type=int, help='either 10 for 10-100 or 36')
 parser.add_argument('--max_boxes', default=36, type=int, help='either 100 for 10-100 or 36')
 parser.add_argument('--roi_score_thresh', default=0.2, type=float, help='ROI score threshold, use 0.5 for VL-BERT')
-parser.add_argument('--batchsize', default=4, type=int, help='batch_size')
+parser.add_argument('--batchsize', default=1, type=int, help='batch_size')
 parser.add_argument('--model', default='res5', type=str, help='options: "res4", "res5"; features come from)')
 parser.add_argument('--weight', default='vg', type=str, 
         help='option: mask, obj, vg. mask:mask_rcnn on COCO, obj: faster_rcnn on COCO, vg: faster_rcnn on Visual Genome')
@@ -355,9 +354,6 @@ def build_model():
 
 
 if __name__ == "__main__":
-    if args.weight == "vgattr":
-        args.batchsize = 1
-
     pathXid = load_image_ids(args.data_path, args.split)     # Get paths and ids
     detector = build_model()
     if args.output_type == 'tsv':
